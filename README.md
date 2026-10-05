@@ -26,7 +26,7 @@ Ahora:
 
 Esto crea:
 - BD `sgr`
-- 12 tablas relacionadas
+- 13 tablas relacionadas
 - Usuario con tus credenciales personalizadas
 
 ### 2. Configurar Credenciales en main_sgr.py
@@ -53,8 +53,8 @@ El script:
 
 ## Características
 
-✓ **12 Tablas optimizadas:**
-- Categorías, Platos, Ingredientes
+✓ **13 Tablas optimizadas:**
+- Categorías, Platos, Platos_Ingredientes, Ingredientes
 - Empleados, Mesas, Clientes
 - Órdenes, Detalles de órdenes
 - Reservas, Inventario
@@ -99,13 +99,21 @@ SGR/
 └── README.md             # Este archivo
 ```
 
-## Documentación Detallada
+## Tablas de la Base de Datos
 
-Para documentación completa y explicación línea por línea, consulta la carpeta `DOCUMENTACION_DETALLADA/`:
-
-- **SQL.md** → Explicación detallada de todas las tablas, tipos de datos y relaciones
-- **MAIN.md** → Documentación completa del código Python
-- **DOCUMENTACION.md** → Guía general del proyecto
+1. **categorias_platos** - Agrupa los platos por tipo
+2. **ingredientes** - Materia prima del restaurante
+3. **platos** - Catálogo de platos disponibles
+4. **platos_ingredientes** - Relación entre platos e ingredientes
+5. **empleados** - Personal del restaurante
+6. **mesas** - Mesas disponibles
+7. **clientes** - Datos de clientes
+8. **reservas** - Reservas de mesas
+9. **ordenes** - Órdenes/pedidos
+10. **detalles_ordenes** - Detalle de platos por orden
+11. **proveedores** - Abastecedores
+12. **inventario** - Control de stock
+13. **pagos** - Registro de pagos
 
 ## ⚠️ Seguridad - Credenciales
 

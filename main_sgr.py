@@ -187,7 +187,7 @@ class Pago:
 
 
 class ConexionSGR:
-    def __init__(self, servidor="localhost", usuario="root", contraseña="", base_datos="sgr"):
+    def __init__(self, servidor="localhost", usuario="usuario_sgr", contraseña="pass_sgr_2024", base_datos="sgr"):
         self.servidor = servidor
         self.usuario = usuario
         self.contraseña = contraseña

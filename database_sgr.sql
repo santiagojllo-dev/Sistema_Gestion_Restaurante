@@ -40,7 +40,20 @@ CREATE TABLE IF NOT EXISTS platos (
     FOREIGN KEY (categoriaId) REFERENCES categorias_platos(id) ON DELETE CASCADE
 );
 
--- Tabla 4: EMPLEADOS
+-- Tabla 4: PLATOS_INGREDIENTES
+-- Relación entre platos e ingredientes (tabla puente)
+CREATE TABLE IF NOT EXISTS platos_ingredientes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    platoId INT NOT NULL,
+    ingredienteId INT NOT NULL,
+    cantidad DECIMAL(10, 2) NOT NULL,
+    unidadMedida VARCHAR(50),
+    FOREIGN KEY (platoId) REFERENCES platos(id) ON DELETE CASCADE,
+    FOREIGN KEY (ingredienteId) REFERENCES ingredientes(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_plato_ingrediente (platoId, ingredienteId)
+);
+
+-- Tabla 5: EMPLEADOS
 -- Personal del restaurante
 CREATE TABLE IF NOT EXISTS empleados (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -55,7 +68,7 @@ CREATE TABLE IF NOT EXISTS empleados (
     fechaCreacion DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla 5: MESAS
+-- Tabla 6: MESAS
 -- Mesas disponibles en el restaurante
 CREATE TABLE IF NOT EXISTS mesas (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -66,7 +79,7 @@ CREATE TABLE IF NOT EXISTS mesas (
     fechaCreacion DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla 6: CLIENTES
+-- Tabla 7: CLIENTES
 -- Datos de clientes del restaurante
 CREATE TABLE IF NOT EXISTS clientes (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -80,7 +93,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     fechaRegistro DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla 7: RESERVAS
+-- Tabla 8: RESERVAS
 -- Gestión de reservas de mesas
 CREATE TABLE IF NOT EXISTS reservas (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -98,7 +111,7 @@ CREATE TABLE IF NOT EXISTS reservas (
     FOREIGN KEY (empleadoId) REFERENCES empleados(id) ON DELETE SET NULL
 );
 
--- Tabla 8: ORDENES
+-- Tabla 9: ORDENES
 -- Órdenes/pedidos de clientes
 CREATE TABLE IF NOT EXISTS ordenes (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -116,7 +129,7 @@ CREATE TABLE IF NOT EXISTS ordenes (
     FOREIGN KEY (empleadoId) REFERENCES empleados(id) ON DELETE RESTRICT
 );
 
--- Tabla 9: DETALLES_ORDENES
+-- Tabla 10: DETALLES_ORDENES
 -- Detalles de cada plato en una orden
 CREATE TABLE IF NOT EXISTS detalles_ordenes (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -131,7 +144,7 @@ CREATE TABLE IF NOT EXISTS detalles_ordenes (
     FOREIGN KEY (platoId) REFERENCES platos(id) ON DELETE RESTRICT
 );
 
--- Tabla 10: PROVEEDORES
+-- Tabla 11: PROVEEDORES
 -- Proveedores de ingredientes
 CREATE TABLE IF NOT EXISTS proveedores (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -145,7 +158,7 @@ CREATE TABLE IF NOT EXISTS proveedores (
     fechaRegistro DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla 11: INVENTARIO
+-- Tabla 12: INVENTARIO
 -- Control de stock de ingredientes
 CREATE TABLE IF NOT EXISTS inventario (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -161,7 +174,7 @@ CREATE TABLE IF NOT EXISTS inventario (
     FOREIGN KEY (proveedorId) REFERENCES proveedores(id) ON DELETE SET NULL
 );
 
--- Tabla 12: PAGOS
+-- Tabla 13: PAGOS
 -- Registro de pagos de órdenes
 CREATE TABLE IF NOT EXISTS pagos (
     id INT AUTO_INCREMENT PRIMARY KEY,
