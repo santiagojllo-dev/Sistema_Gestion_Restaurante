@@ -1,162 +1,100 @@
 # Sistema de Gestión de Restaurantes (SGR)
 
-Sistema completo en Python y MySQL para gestionar restaurantes: menú, empleados, órdenes, clientes, reservas, inventario y más.
+Aplicación de consola en **Python** conectada a una base de datos **MySQL** (SGBD libre) para administrar un restaurante: menú (categorías, platos, ingredientes), empleados, mesas, clientes, reservas, órdenes con sus detalles, inventario, proveedores y pagos.
 
-## Requisitos
+Toda la manipulación de datos se hace con **procedimientos almacenados**: Python no escribe SQL, solo ejecuta `{CALL sp_...}`.
 
-- Python 3.7+
-- MySQL (XAMPP o instalación standalone)
-- XAMPP (para desarrollo)
+> Este es el repositorio **"hasta conexiones"**. La versión mejorada (estructura por capas + API REST con Flask) está en el repositorio `Sistema_Gestion_Restaurante_API`.
 
-## Instalación Rápida
+## Herramientas
 
-### 1. Configurar Base de Datos
+| Herramienta | Uso |
+|---|---|
+| MySQL / MariaDB (XAMPP) | SGBD libre |
+| Python 3 | Lenguaje |
+| pyodbc + MySQL ODBC Unicode Driver | Conexión Python ↔ MySQL |
+| VS Code | IDE libre |
 
-**IMPORTANTE:** Antes de ejecutar el SQL:
-1. Abre `database_sgr.sql` en un editor de texto
-2. Busca la línea: `CREATE USER 'usuario_sgr'@'localhost' IDENTIFIED BY 'pass_sgr_2024';`
-3. Cambia `usuario_sgr` y `pass_sgr_2024` por tus credenciales deseadas
-4. **Guarda los cambios**
+## Archivos
 
-Ahora:
-1. Abre **phpMyAdmin** (`http://localhost/phpmyadmin`)
-2. Ve a la pestaña **SQL**
-3. Copia todo el contenido de `database_sgr.sql`
-4. Pégalo en phpMyAdmin y haz clic en **Enviar**
-
-Esto crea:
-- BD `sgr`
-- 13 tablas relacionadas
-- Usuario con tus credenciales personalizadas
-
-### 2. Configurar Credenciales en main_sgr.py
-
-Si usaste credenciales diferentes en el SQL, actualiza `main_sgr.py`:
-
-Busca la línea:
-```python
-def __init__(self, servidor="localhost", usuario="root", contraseña="", base_datos="sgr"):
+```
+database_sgr.sql        # 1. Crea la BD "sgr", las 13 tablas y el usuario de la app
+procedimientos_sgr.sql  # 2. Crea los 67 procedimientos almacenados
+datos_prueba.sql        # 3. Datos de ejemplo (insertados con los procedimientos)
+main_sgr.py             # Aplicación de consola
+requirements.txt        # Dependencias de Python
 ```
 
-Cambia `usuario="root"` y `contraseña=""` con tus credenciales.
+## Instalación
 
-### 3. Ejecutar la Aplicación
+1. Instalar el **MySQL Connector/ODBC** (driver "MySQL ODBC ... Unicode Driver", 64 bits). El programa detecta solo la versión instalada.
+2. Iniciar MySQL desde el panel de XAMPP.
+3. En phpMyAdmin (`http://localhost/phpmyadmin`) → pestaña **SQL**, ejecutar en este orden:
+   1. `database_sgr.sql`
+   2. `procedimientos_sgr.sql`
+   3. `datos_prueba.sql` (opcional)
+4. Instalar dependencias y ejecutar:
 
 ```powershell
-python main_sgr.py
+py -m pip install -r requirements.txt
+py main_sgr.py
 ```
 
-El script:
-- Instala automáticamente `mysql-connector-python` si no lo tienes
-- Se conecta a la BD con tus credenciales
-- Abre el menú interactivo
+Credenciales por defecto (definidas en `database_sgr.sql` y en `ConexionSGR` de `main_sgr.py`): usuario `usuario_sgr`, contraseña `pass_sgr_2024`. Si las cambias en el SQL, cámbialas también en `main_sgr.py`.
 
-## Características
+## Procedimientos almacenados
 
-✓ **13 Tablas optimizadas:**
-- Categorías, Platos, Platos_Ingredientes, Ingredientes
-- Empleados, Mesas, Clientes
-- Órdenes, Detalles de órdenes
-- Reservas, Inventario
-- Proveedores, Pagos
+Por cada una de las 13 tablas hay 5 procedimientos (13 × 5 = 65):
 
-✓ **Operaciones CRUD completas**
-✓ **Relaciones entre tablas**
-✓ **Menú interactivo intuitivo**
-✓ **Manejo de errores robusto**
+| Procedimiento | Qué hace |
+|---|---|
+| `sp_<tabla>_listar()` | Devuelve todos los registros |
+| `sp_<tabla>_buscar(id)` | Devuelve un registro |
+| `sp_<tabla>_insertar(campos...)` | Inserta y devuelve el registro creado. Un `NULL` usa el valor por defecto |
+| `sp_<tabla>_actualizar(id, campos...)` | Cambia solo los campos que llegan con valor (`NULL` = no cambiar) |
+| `sp_<tabla>_eliminar(id)` | Elimina y devuelve cuántas filas borró |
+
+Y 2 con lógica de negocio:
+
+- `sp_ordenes_recalcular_total(ordenId)`: `ordenes.total` = suma de los subtotales de sus detalles. Lo llaman los procedimientos de `detalles_ordenes`, que además calculan `subtotal = cantidad × precio_unitario` (si no se envía precio, toma el del plato).
+- `sp_reporte_conteos()`: cantidad de registros por tabla.
+
+Ejemplo en MySQL:
+
+```sql
+CALL sp_platos_insertar('Sancocho', 'Con arroz y aguacate', 2, 28000, NULL, NULL);
+CALL sp_platos_actualizar(6, NULL, NULL, NULL, 29500, NULL, NULL);  -- solo cambia el precio
+CALL sp_detalles_ordenes_insertar(2, 6, 1, NULL, NULL, NULL);       -- recalcula el total de la orden 2
+CALL sp_reporte_conteos();
+```
 
 ## Uso
 
-Al ejecutar `python main_sgr.py`, verás:
+Menú principal: una opción por tabla (1–13), `14` reportes, `0` salir. Cada tabla tiene **Ver todos, Buscar por ID, Agregar, Actualizar y Eliminar**.
 
-```
-SISTEMA DE GESTIÓN DE RESTAURANTES (SGR)
-============================================================
+## Tablas
 
-  1. Gestionar Categorías de Platos
-  2. Gestionar Ingredientes
-  3. Gestionar Platos
-  4. Gestionar Empleados
-  5. Gestionar Mesas
-  6. Gestionar Clientes
-  7. Gestionar Reservas
-  8. Gestionar Órdenes
-  9. Gestionar Inventario
-  10. Gestionar Proveedores
-  11. Gestionar Pagos
-  12. Ver Reportes
-  0. Salir
-```
+1. **categorias_platos**: agrupa los platos por tipo
+2. **ingredientes**: materia prima
+3. **platos**: catálogo del menú
+4. **platos_ingredientes**: qué ingredientes lleva cada plato
+5. **empleados**: personal
+6. **mesas**: mesas del local
+7. **clientes**
+8. **reservas**: reservas de mesas
+9. **ordenes**: pedidos
+10. **detalles_ordenes**: platos de cada pedido
+11. **proveedores**
+12. **inventario**: stock de ingredientes
+13. **pagos**
 
-Elige una opción y sigue las instrucciones.
+## Solución de problemas
 
-## Estructura de Archivos
-
-```
-SGR/
-├── database_sgr.sql      # Script SQL para crear la BD
-├── main_sgr.py           # Aplicación Python
-└── README.md             # Este archivo
-```
-
-## Tablas de la Base de Datos
-
-1. **categorias_platos** - Agrupa los platos por tipo
-2. **ingredientes** - Materia prima del restaurante
-3. **platos** - Catálogo de platos disponibles
-4. **platos_ingredientes** - Relación entre platos e ingredientes
-5. **empleados** - Personal del restaurante
-6. **mesas** - Mesas disponibles
-7. **clientes** - Datos de clientes
-8. **reservas** - Reservas de mesas
-9. **ordenes** - Órdenes/pedidos
-10. **detalles_ordenes** - Detalle de platos por orden
-11. **proveedores** - Abastecedores
-12. **inventario** - Control de stock
-13. **pagos** - Registro de pagos
-
-## ⚠️ Seguridad - Credenciales
-
-**Nunca** subas credenciales reales a GitHub. 
-
-Para este proyecto:
-1. **Desarrollo local:** Personaliza las credenciales en `database_sgr.sql`
-2. **Producción:** Usa variables de entorno o gestores de secretos
-3. **GitHub:** El repo contiene solo placeholders, no credenciales reales
-
-Recuerda:
-- No hardcodees contraseñas en el código
-- No comitees archivos `.env` o con secretos
-- Cambia las credenciales antes de usar en producción
-
-## Requisitos de Base de Datos
-
-El script crea automáticamente:
-
-```sql
-CREATE DATABASE sgr;
-CREATE USER 'usuario_sgr'@'localhost' IDENTIFIED BY 'pass_sgr_2024';
-GRANT SELECT, INSERT, UPDATE, DELETE ON sgr.* TO 'usuario_sgr'@'localhost';
-```
-
-## Solución de Problemas
-
-### Error: "Access denied for user 'usuario_sgr'"
-- Verifica que ejecutaste `database_sgr.sql` en phpMyAdmin
-- Asegúrate de que el usuario fue creado con la contraseña correcta
-
-### Error: "No se encuentra mysql.connector"
-- El script lo instala automáticamente
-- Si falla, ejecuta: `pip install mysql-connector-python`
-
-### Error: "Connection refused"
-- Verifica que MySQL (XAMPP) está ejecutándose
-- Verifica que estás en `localhost`
+- **"Data source name not found"**: falta el driver MySQL ODBC (paso 1).
+- **"Access denied for user 'usuario_sgr'"**: no se ejecutó `database_sgr.sql`, o las credenciales no coinciden.
+- **"PROCEDURE sgr.sp_... does not exist"**: no se ejecutó `procedimientos_sgr.sql`.
+- **"Connection refused"**: MySQL no está iniciado en XAMPP.
 
 ## Licencia
 
-Proyecto educativo
-
-## Contacto
-
-Para preguntas o reportar problemas, contacta al equipo de desarrollo.
+Proyecto educativo.

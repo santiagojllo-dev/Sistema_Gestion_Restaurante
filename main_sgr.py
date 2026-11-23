@@ -1,13 +1,4 @@
-import subprocess
-import sys
-from datetime import datetime, timedelta
-
-try:
-    import mysql.connector
-except ImportError:
-    print("Instalando mysql-connector-python...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "mysql-connector-python", "-q"])
-    import mysql.connector
+import pyodbc
 
 
 class CategoriaPlato:
@@ -187,505 +178,224 @@ class Pago:
 
 
 class ConexionSGR:
-    def __init__(self, servidor="localhost", usuario="usuario_sgr", contraseña="pass_sgr_2024", base_datos="sgr"):
+    """Conexión a MySQL con pyodbc. Toda la manipulación de datos se hace con procedimientos almacenados."""
+
+    def __init__(self, servidor="localhost", usuario="usuario_sgr", contraseña="pass_sgr_2024",
+                 base_datos="sgr", puerto="3306", driver=None):
         self.servidor = servidor
         self.usuario = usuario
         self.contraseña = contraseña
         self.base_datos = base_datos
+        self.puerto = puerto
+        self.driver = driver or self.buscar_driver()
         self.conexion = None
-        self.cursor = None
+
+    @staticmethod
+    def buscar_driver():
+        """Busca el driver MySQL ODBC Unicode instalado (9.0, 8.x, ...)."""
+        for nombre in pyodbc.drivers():
+            if "MySQL ODBC" in nombre and "Unicode" in nombre:
+                return nombre
+        return "MySQL ODBC 9.0 Unicode Driver"
+
+    def string_conexion(self):
+        return (f"Driver={{{self.driver}}};Server={self.servidor};Database={self.base_datos};"
+                f"PORT={self.puerto};user={self.usuario};password={self.contraseña};")
 
     def conectar(self):
         try:
-            self.conexion = mysql.connector.connect(
-                host=self.servidor,
-                user=self.usuario,
-                password=self.contraseña,
-                database=self.base_datos
-            )
-            self.cursor = self.conexion.cursor()
-            print(f"✓ Conectado a '{self.base_datos}'")
+            self.conexion = pyodbc.connect(self.string_conexion())
+            print(f"✓ Conectado a '{self.base_datos}' ({self.driver})")
             return True
         except Exception as e:
             print(f"✗ Error: {e}")
             return False
 
     def desconectar(self):
-        if self.cursor:
-            self.cursor.close()
         if self.conexion:
             self.conexion.close()
         print("✓ Desconectado")
 
-    def ejecutar_query(self, query, params=None):
+    def llamar_sp(self, nombre, parametros=None):
+        """Ejecuta {CALL nombre(?, ?, ...)} y devuelve (columnas, filas)."""
+        parametros = parametros or []
+        marcas = ", ".join(["?"] * len(parametros))
+        cursor = self.conexion.cursor()
         try:
-            if params:
-                self.cursor.execute(query, params)
-            else:
-                self.cursor.execute(query)
+            cursor.execute("{CALL " + nombre + " (" + marcas + ")}", parametros)
+            columnas, filas = [], []
+            if cursor.description:
+                columnas = [c[0] for c in cursor.description]
+                filas = cursor.fetchall()
+            # MySQL devuelve un resultado extra de estado después de cada CALL; hay que consumirlo
+            while cursor.nextset():
+                pass
             self.conexion.commit()
-            return True
+            return columnas, filas
         except Exception as e:
             self.conexion.rollback()
-            print(f"Error: {e}")
-            return False
+            print(f"✗ Error: {e}")
+            return [], []
+        finally:
+            cursor.close()
 
-    def obtener_todos(self, tabla):
-        try:
-            self.cursor.execute(f"SELECT * FROM {tabla}")
-            return self.cursor.fetchall()
-        except Exception as e:
-            print(f"Error: {e}")
-            return []
 
-    def obtener_por_id(self, tabla, id_valor):
-        try:
-            self.cursor.execute(f"SELECT * FROM {tabla} WHERE id = %s", (id_valor,))
-            return self.cursor.fetchone()
-        except Exception as e:
-            print(f"Error: {e}")
-            return None
+# ------------------------------------------------------------------------------
+# Configuración de los menús. Por cada tabla:
+#   campos  -> parámetros del procedimiento sp_<tabla>_insertar / _actualizar, en orden
+#              (columna, texto a mostrar, tipo)   tipo: str | int | float
+#   mostrar -> columnas que se muestran al listar
+# ------------------------------------------------------------------------------
+MENUS = [
+    ("Categorías de Platos", "categorias_platos",
+     [("nombre", "Nombre", str), ("descripcion", "Descripción", str), ("estado", "Estado (activo/inactivo)", str)],
+     ["id", "nombre", "descripcion", "estado"]),
+    ("Ingredientes", "ingredientes",
+     [("nombre", "Nombre", str), ("descripcion", "Descripción", str), ("unidadMedida", "Unidad (kg, L, unidad)", str),
+      ("precioUnitario", "Precio unitario", float), ("estado", "Estado (activo/inactivo)", str)],
+     ["id", "nombre", "unidadMedida", "precioUnitario", "estado"]),
+    ("Platos", "platos",
+     [("nombre", "Nombre", str), ("descripcion", "Descripción", str), ("categoriaId", "ID de categoría", int),
+      ("precio", "Precio", float), ("tiempo_preparacion", "Tiempo de preparación (min)", int),
+      ("estado", "Estado (disponible/no_disponible)", str)],
+     ["id", "nombre", "categoriaId", "precio", "estado"]),
+    ("Ingredientes por Plato", "platos_ingredientes",
+     [("platoId", "ID de plato", int), ("ingredienteId", "ID de ingrediente", int), ("cantidad", "Cantidad", float),
+      ("unidadMedida", "Unidad", str)],
+     ["id", "platoId", "ingredienteId", "cantidad", "unidadMedida"]),
+    ("Empleados", "empleados",
+     [("nombre", "Nombre", str), ("apellido", "Apellido", str), ("email", "Email", str), ("telefono", "Teléfono", str),
+      ("puesto", "Puesto", str), ("salario", "Salario", float), ("fechaContratacion", "Fecha contratación (AAAA-MM-DD)", str),
+      ("estado", "Estado (activo/inactivo)", str)],
+     ["id", "nombre", "apellido", "puesto", "estado"]),
+    ("Mesas", "mesas",
+     [("numero_mesa", "Número de mesa", int), ("capacidad", "Capacidad", int), ("ubicacion", "Ubicación", str),
+      ("estado", "Estado (disponible/ocupada/reservada/mantenimiento)", str)],
+     ["id", "numero_mesa", "capacidad", "ubicacion", "estado"]),
+    ("Clientes", "clientes",
+     [("nombre", "Nombre", str), ("apellido", "Apellido", str), ("email", "Email", str), ("telefono", "Teléfono", str),
+      ("direccion", "Dirección", str), ("ciudad", "Ciudad", str), ("tipoCliente", "Tipo (regular/vip/ocasional)", str)],
+     ["id", "nombre", "apellido", "ciudad", "tipoCliente"]),
+    ("Reservas", "reservas",
+     [("mesaId", "ID de mesa", int), ("clienteId", "ID de cliente", int), ("empleadoId", "ID de empleado", int),
+      ("fecha_reserva", "Fecha (AAAA-MM-DD)", str), ("hora_reserva", "Hora (HH:MM)", str),
+      ("numero_personas", "Número de personas", int), ("notas", "Notas", str),
+      ("estado", "Estado (confirmada/cancelada/completada)", str)],
+     ["id", "mesaId", "clienteId", "fecha_reserva", "hora_reserva", "estado"]),
+    ("Órdenes", "ordenes",
+     [("mesaId", "ID de mesa", int), ("clienteId", "ID de cliente", int), ("empleadoId", "ID de empleado", int),
+      ("numero_orden", "Número de orden", int), ("hora_orden", "Hora (HH:MM)", str),
+      ("estado", "Estado (pendiente/en_preparacion/lista/entregada/cancelada)", str), ("notas", "Notas", str)],
+     ["id", "numero_orden", "mesaId", "total", "estado"]),
+    ("Detalles de Órdenes", "detalles_ordenes",
+     [("ordenId", "ID de orden", int), ("platoId", "ID de plato", int), ("cantidad", "Cantidad", int),
+      ("precio_unitario", "Precio unitario (vacío = precio del plato)", float), ("notas_plato", "Notas", str),
+      ("estado", "Estado (pendiente/en_preparacion/listo/entregado)", str)],
+     ["id", "ordenId", "platoId", "cantidad", "precio_unitario", "subtotal"]),
+    ("Inventario", "inventario",
+     [("ingredienteId", "ID de ingrediente", int), ("proveedorId", "ID de proveedor", int),
+      ("cantidad_actual", "Cantidad actual", float), ("cantidad_minima", "Cantidad mínima", float),
+      ("cantidad_maxima", "Cantidad máxima", float), ("fecha_ultima_compra", "Última compra (AAAA-MM-DD)", str),
+      ("costo_total", "Costo total", float), ("estado", "Estado (optimo/bajo/critico)", str)],
+     ["id", "ingredienteId", "cantidad_actual", "cantidad_minima", "estado"]),
+    ("Proveedores", "proveedores",
+     [("nombre", "Nombre", str), ("contacto", "Contacto", str), ("email", "Email", str), ("telefono", "Teléfono", str),
+      ("direccion", "Dirección", str), ("ciudad", "Ciudad", str), ("estado", "Estado (activo/inactivo)", str)],
+     ["id", "nombre", "contacto", "telefono", "estado"]),
+    ("Pagos", "pagos",
+     [("ordenId", "ID de orden", int), ("monto", "Monto", float),
+      ("metodo_pago", "Método (efectivo/tarjeta/transferencia/otro)", str),
+      ("referencia_transaccion", "Referencia", str), ("estado", "Estado (pendiente/completado/rechazado)", str),
+      ("notas", "Notas", str)],
+     ["id", "ordenId", "monto", "metodo_pago", "estado"]),
+]
 
-    def insertar(self, tabla, datos):
-        columnas = ", ".join(datos.keys())
-        placeholders = ", ".join(["%s"] * len(datos))
-        query = f"INSERT INTO {tabla} ({columnas}) VALUES ({placeholders})"
-        try:
-            self.cursor.execute(query, tuple(datos.values()))
-            self.conexion.commit()
-            id_insertado = self.cursor.lastrowid
-            print(f"✓ Insertado en {tabla} con ID: {id_insertado}")
-            return id_insertado
-        except Exception as e:
-            self.conexion.rollback()
-            print(f"Error al insertar: {e}")
-            return None
 
-    def actualizar(self, tabla, id_valor, datos):
-        actualizaciones = ", ".join([f"{k} = %s" for k in datos.keys()])
-        query = f"UPDATE {tabla} SET {actualizaciones} WHERE id = %s"
-        valores = tuple(list(datos.values()) + [id_valor])
-        try:
-            self.cursor.execute(query, valores)
-            self.conexion.commit()
-            print(f"✓ Actualizado en {tabla}")
-            return True
-        except Exception as e:
-            self.conexion.rollback()
-            print(f"Error: {e}")
-            return False
+def pedir_valores(campos):
+    """Pide cada campo. Vacío = None (en insertar usa el valor por defecto, en actualizar no cambia)."""
+    valores = []
+    for _, etiqueta, tipo in campos:
+        texto = input(f"  {etiqueta}: ").strip()
+        valores.append(tipo(texto) if texto else None)
+    return valores
 
-    def eliminar(self, tabla, id_valor):
-        try:
-            self.cursor.execute(f"DELETE FROM {tabla} WHERE id = %s", (id_valor,))
-            self.conexion.commit()
-            print(f"✓ Eliminado de {tabla}")
-            return True
-        except Exception as e:
-            self.conexion.rollback()
-            print(f"Error: {e}")
-            return False
 
-    def contar_registros(self, tabla):
+def imprimir_filas(columnas, filas, mostrar):
+    if not filas:
+        print("  No hay registros")
+        return
+    indices = [columnas.index(c) for c in mostrar]
+    print(f"\nTotal: {len(filas)}\n")
+    print("  " + " | ".join(mostrar))
+    for fila in filas:
+        print("  " + " | ".join(str(fila[i]) for i in indices))
+
+
+def menu_tabla(db, titulo, tabla, campos, mostrar):
+    while True:
+        print(f"\n--- {titulo.upper()} ---")
+        print("  1. Ver todos")
+        print("  2. Buscar por ID")
+        print("  3. Agregar")
+        print("  4. Actualizar")
+        print("  5. Eliminar")
+        print("  6. Volver")
+        opcion = input("Opción: ").strip()
+
         try:
-            self.cursor.execute(f"SELECT COUNT(*) FROM {tabla}")
-            resultado = self.cursor.fetchone()
-            return resultado[0] if resultado else 0
-        except Exception as e:
-            print(f"Error: {e}")
-            return 0
+            if opcion == "1":
+                columnas, filas = db.llamar_sp(f"sp_{tabla}_listar")
+                imprimir_filas(columnas, filas, mostrar)
+
+            elif opcion == "2":
+                id_valor = int(input("ID: ").strip())
+                columnas, filas = db.llamar_sp(f"sp_{tabla}_buscar", [id_valor])
+                if filas:
+                    for columna, valor in zip(columnas, filas[0]):
+                        print(f"  {columna}: {valor}")
+                else:
+                    print("  No existe")
+
+            elif opcion == "3":
+                print("(deja vacío para usar el valor por defecto)")
+                columnas, filas = db.llamar_sp(f"sp_{tabla}_insertar", pedir_valores(campos))
+                if filas:
+                    print(f"✓ Insertado en {tabla} con ID: {filas[0][0]}")
+
+            elif opcion == "4":
+                id_valor = int(input("ID a actualizar: ").strip())
+                print("(deja vacío lo que NO quieras cambiar)")
+                columnas, filas = db.llamar_sp(f"sp_{tabla}_actualizar", [id_valor] + pedir_valores(campos))
+                print("✓ Actualizado" if filas else "  No existe")
+
+            elif opcion == "5":
+                id_valor = int(input("ID a eliminar: ").strip())
+                columnas, filas = db.llamar_sp(f"sp_{tabla}_eliminar", [id_valor])
+                print("✓ Eliminado" if filas and filas[0][0] else "  No existe")
+
+            elif opcion == "6":
+                break
+
+        except ValueError:
+            print("✗ Valor inválido")
+
+
+def menu_reportes(db):
+    print("\n--- REPORTES (sp_reporte_conteos) ---\n")
+    columnas, filas = db.llamar_sp("sp_reporte_conteos")
+    for tabla, cantidad in filas:
+        print(f"  {tabla}: {cantidad}")
 
 
 def mostrar_menu_principal():
     print("\n" + "="*60)
     print("SISTEMA DE GESTIÓN DE RESTAURANTES (SGR)")
-    print("="*60)
-    print("\n  1. Gestionar Categorías de Platos")
-    print("  2. Gestionar Ingredientes")
-    print("  3. Gestionar Platos")
-    print("  4. Gestionar Empleados")
-    print("  5. Gestionar Mesas")
-    print("  6. Gestionar Clientes")
-    print("  7. Gestionar Reservas")
-    print("  8. Gestionar Órdenes")
-    print("  9. Gestionar Inventario")
-    print("  10. Gestionar Proveedores")
-    print("  11. Gestionar Pagos")
-    print("  12. Ver Reportes")
+    print("="*60 + "\n")
+    for numero, menu in enumerate(MENUS, start=1):
+        print(f"  {numero}. Gestionar {menu[0]}")
+    print(f"  {len(MENUS) + 1}. Ver Reportes")
     print("  0. Salir")
     print("\n" + "="*60)
-
-
-def menu_categorias(db):
-    while True:
-        print("\n--- CATEGORÍAS DE PLATOS ---")
-        print("  1. Ver todas")
-        print("  2. Agregar nueva")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("categorias_platos")
-            if registros:
-                print(f"\nTotal: {len(registros)} categorías\n")
-                for reg in registros:
-                    print(f"  [{reg[0]}] {reg[1]} - {reg[2]}")
-            else:
-                print("  No hay categorías")
-
-        elif opcion == "2":
-            nombre = input("Nombre: ").strip()
-            descripcion = input("Descripción: ").strip()
-            datos = {"nombre": nombre, "descripcion": descripcion}
-            db.insertar("categorias_platos", datos)
-
-        elif opcion == "3":
-            break
-
-
-def menu_ingredientes(db):
-    while True:
-        print("\n--- INGREDIENTES ---")
-        print("  1. Ver todos")
-        print("  2. Agregar nuevo")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("ingredientes")
-            if registros:
-                print(f"\nTotal: {len(registros)} ingredientes\n")
-                for reg in registros:
-                    print(f"  [{reg[0]}] {reg[1]} - ${reg[4]} por {reg[3]}")
-            else:
-                print("  No hay ingredientes")
-
-        elif opcion == "2":
-            nombre = input("Nombre: ").strip()
-            descripcion = input("Descripción: ").strip()
-            unidad = input("Unidad de medida (kg, L, unidad, etc): ").strip()
-            try:
-                precio = float(input("Precio unitario: ").strip())
-                datos = {"nombre": nombre, "descripcion": descripcion,
-                        "unidadMedida": unidad, "precioUnitario": precio}
-                db.insertar("ingredientes", datos)
-            except ValueError:
-                print("✗ Precio inválido")
-
-        elif opcion == "3":
-            break
-
-
-def menu_platos(db):
-    while True:
-        print("\n--- PLATOS ---")
-        print("  1. Ver todos")
-        print("  2. Agregar nuevo")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("platos")
-            if registros:
-                print(f"\nTotal: {len(registros)} platos\n")
-                for reg in registros:
-                    print(f"  [{reg[0]}] {reg[1]} - ${reg[4]} - {reg[7]}")
-            else:
-                print("  No hay platos")
-
-        elif opcion == "2":
-            nombre = input("Nombre del plato: ").strip()
-            descripcion = input("Descripción: ").strip()
-            try:
-                categoriaId = int(input("ID de categoría: ").strip())
-                precio = float(input("Precio: ").strip())
-                tiempo = int(input("Tiempo de preparación (minutos): ").strip())
-                datos = {"nombre": nombre, "descripcion": descripcion,
-                        "categoriaId": categoriaId, "precio": precio,
-                        "tiempo_preparacion": tiempo}
-                db.insertar("platos", datos)
-            except ValueError:
-                print("✗ Valores inválidos")
-
-        elif opcion == "3":
-            break
-
-
-def menu_empleados(db):
-    while True:
-        print("\n--- EMPLEADOS ---")
-        print("  1. Ver todos")
-        print("  2. Agregar nuevo")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("empleados")
-            if registros:
-                print(f"\nTotal: {len(registros)} empleados\n")
-                for reg in registros:
-                    print(f"  [{reg[0]}] {reg[1]} {reg[2]} - {reg[5]}")
-            else:
-                print("  No hay empleados")
-
-        elif opcion == "2":
-            nombre = input("Nombre: ").strip()
-            apellido = input("Apellido: ").strip()
-            email = input("Email: ").strip()
-            telefono = input("Teléfono: ").strip()
-            puesto = input("Puesto: ").strip()
-            try:
-                salario = float(input("Salario: ").strip())
-                datos = {"nombre": nombre, "apellido": apellido, "email": email,
-                        "telefono": telefono, "puesto": puesto, "salario": salario}
-                db.insertar("empleados", datos)
-            except ValueError:
-                print("✗ Salario inválido")
-
-        elif opcion == "3":
-            break
-
-
-def menu_mesas(db):
-    while True:
-        print("\n--- MESAS ---")
-        print("  1. Ver todas")
-        print("  2. Agregar nueva")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("mesas")
-            if registros:
-                print(f"\nTotal: {len(registros)} mesas\n")
-                for reg in registros:
-                    print(f"  Mesa #{reg[1]} - Capacidad: {reg[2]} - {reg[4]}")
-            else:
-                print("  No hay mesas")
-
-        elif opcion == "2":
-            try:
-                numero = int(input("Número de mesa: ").strip())
-                capacidad = int(input("Capacidad: ").strip())
-                ubicacion = input("Ubicación: ").strip()
-                datos = {"numero_mesa": numero, "capacidad": capacidad, "ubicacion": ubicacion}
-                db.insertar("mesas", datos)
-            except ValueError:
-                print("✗ Valores inválidos")
-
-        elif opcion == "3":
-            break
-
-
-def menu_clientes(db):
-    while True:
-        print("\n--- CLIENTES ---")
-        print("  1. Ver todos")
-        print("  2. Agregar nuevo")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("clientes")
-            if registros:
-                print(f"\nTotal: {len(registros)} clientes\n")
-                for reg in registros:
-                    print(f"  [{reg[0]}] {reg[1]} {reg[2]} - {reg[7]}")
-            else:
-                print("  No hay clientes")
-
-        elif opcion == "2":
-            nombre = input("Nombre: ").strip()
-            apellido = input("Apellido: ").strip()
-            email = input("Email: ").strip()
-            telefono = input("Teléfono: ").strip()
-            datos = {"nombre": nombre, "apellido": apellido, "email": email, "telefono": telefono}
-            db.insertar("clientes", datos)
-
-        elif opcion == "3":
-            break
-
-
-def menu_reservas(db):
-    while True:
-        print("\n--- RESERVAS ---")
-        print("  1. Ver todas")
-        print("  2. Agregar nueva")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("reservas")
-            if registros:
-                print(f"\nTotal: {len(registros)} reservas\n")
-                for reg in registros:
-                    print(f"  Mesa #{reg[1]} - {reg[4]} {reg[5]} - {reg[9]}")
-            else:
-                print("  No hay reservas")
-
-        elif opcion == "2":
-            try:
-                mesaId = int(input("ID de mesa: ").strip())
-                clienteId = int(input("ID de cliente: ").strip())
-                empleadoId = int(input("ID de empleado (opcional, 0 para omitir): ").strip())
-                fecha = input("Fecha (YYYY-MM-DD): ").strip()
-                hora = input("Hora (HH:MM): ").strip()
-                personas = int(input("Número de personas: ").strip())
-
-                empleadoId = empleadoId if empleadoId > 0 else None
-                datos = {"mesaId": mesaId, "clienteId": clienteId, "empleadoId": empleadoId,
-                        "fecha_reserva": fecha, "hora_reserva": hora, "numero_personas": personas}
-                db.insertar("reservas", datos)
-            except ValueError:
-                print("✗ Valores inválidos")
-
-        elif opcion == "3":
-            break
-
-
-def menu_ordenes(db):
-    while True:
-        print("\n--- ÓRDENES ---")
-        print("  1. Ver todas")
-        print("  2. Crear nueva")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("ordenes")
-            if registros:
-                print(f"\nTotal: {len(registros)} órdenes\n")
-                for reg in registros:
-                    print(f"  Orden #{reg[5]} - Mesa {reg[1]} - ${reg[7]} - {reg[9]}")
-            else:
-                print("  No hay órdenes")
-
-        elif opcion == "2":
-            try:
-                mesaId = int(input("ID de mesa: ").strip())
-                empleadoId = int(input("ID de empleado: ").strip())
-                numero_orden = int(input("Número de orden: ").strip())
-                clienteId = int(input("ID de cliente (opcional, 0 para omitir): ").strip())
-
-                clienteId = clienteId if clienteId > 0 else None
-                datos = {"mesaId": mesaId, "clienteId": clienteId, "empleadoId": empleadoId,
-                        "numero_orden": numero_orden}
-                db.insertar("ordenes", datos)
-            except ValueError:
-                print("✗ Valores inválidos")
-
-        elif opcion == "3":
-            break
-
-
-def menu_inventario(db):
-    while True:
-        print("\n--- INVENTARIO ---")
-        print("  1. Ver stock")
-        print("  2. Agregar ingrediente")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("inventario")
-            if registros:
-                print(f"\nTotal: {len(registros)} ingredientes en stock\n")
-                for reg in registros:
-                    print(f"  Ingrediente #{reg[1]} - Stock: {reg[3]} - {reg[8]}")
-            else:
-                print("  No hay inventario")
-
-        elif opcion == "2":
-            try:
-                ingredienteId = int(input("ID de ingrediente: ").strip())
-                cantidad = float(input("Cantidad: ").strip())
-                datos = {"ingredienteId": ingredienteId, "cantidad_actual": cantidad}
-                db.insertar("inventario", datos)
-            except ValueError:
-                print("✗ Valores inválidos")
-
-        elif opcion == "3":
-            break
-
-
-def menu_proveedores(db):
-    while True:
-        print("\n--- PROVEEDORES ---")
-        print("  1. Ver todos")
-        print("  2. Agregar nuevo")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("proveedores")
-            if registros:
-                print(f"\nTotal: {len(registros)} proveedores\n")
-                for reg in registros:
-                    print(f"  [{reg[0]}] {reg[1]} - {reg[4]}")
-            else:
-                print("  No hay proveedores")
-
-        elif opcion == "2":
-            nombre = input("Nombre: ").strip()
-            contacto = input("Contacto: ").strip()
-            email = input("Email: ").strip()
-            telefono = input("Teléfono: ").strip()
-            datos = {"nombre": nombre, "contacto": contacto, "email": email, "telefono": telefono}
-            db.insertar("proveedores", datos)
-
-        elif opcion == "3":
-            break
-
-
-def menu_pagos(db):
-    while True:
-        print("\n--- PAGOS ---")
-        print("  1. Ver todos")
-        print("  2. Registrar pago")
-        print("  3. Volver")
-        opcion = input("Opción: ").strip()
-
-        if opcion == "1":
-            registros = db.obtener_todos("pagos")
-            if registros:
-                print(f"\nTotal: {len(registros)} pagos\n")
-                for reg in registros:
-                    print(f"  Orden #{reg[1]} - ${reg[2]} - {reg[3]} - {reg[6]}")
-            else:
-                print("  No hay pagos")
-
-        elif opcion == "2":
-            try:
-                ordenId = int(input("ID de orden: ").strip())
-                monto = float(input("Monto: ").strip())
-                print("\nMétodos: 1.Efectivo 2.Tarjeta 3.Transferencia 4.Otro")
-                metodos = {1: "efectivo", 2: "tarjeta", 3: "transferencia", 4: "otro"}
-                metodo_num = int(input("Seleccionar método: ").strip())
-                metodo = metodos.get(metodo_num, "efectivo")
-
-                datos = {"ordenId": ordenId, "monto": monto, "metodo_pago": metodo}
-                db.insertar("pagos", datos)
-            except ValueError:
-                print("✗ Valores inválidos")
-
-        elif opcion == "3":
-            break
-
-
-def menu_reportes(db):
-    print("\n--- REPORTES ---")
-    print(f"\nCategorías: {db.contar_registros('categorias_platos')}")
-    print(f"Ingredientes: {db.contar_registros('ingredientes')}")
-    print(f"Platos: {db.contar_registros('platos')}")
-    print(f"Empleados: {db.contar_registros('empleados')}")
-    print(f"Mesas: {db.contar_registros('mesas')}")
-    print(f"Clientes: {db.contar_registros('clientes')}")
-    print(f"Reservas: {db.contar_registros('reservas')}")
-    print(f"Órdenes: {db.contar_registros('ordenes')}")
-    print(f"Detalles de órdenes: {db.contar_registros('detalles_ordenes')}")
-    print(f"Proveedores: {db.contar_registros('proveedores')}")
-    print(f"Inventario: {db.contar_registros('inventario')}")
-    print(f"Pagos: {db.contar_registros('pagos')}")
 
 
 def main():
@@ -700,33 +410,13 @@ def main():
             mostrar_menu_principal()
             opcion = input("Opción: ").strip()
 
-            if opcion == "1":
-                menu_categorias(db)
-            elif opcion == "2":
-                menu_ingredientes(db)
-            elif opcion == "3":
-                menu_platos(db)
-            elif opcion == "4":
-                menu_empleados(db)
-            elif opcion == "5":
-                menu_mesas(db)
-            elif opcion == "6":
-                menu_clientes(db)
-            elif opcion == "7":
-                menu_reservas(db)
-            elif opcion == "8":
-                menu_ordenes(db)
-            elif opcion == "9":
-                menu_inventario(db)
-            elif opcion == "10":
-                menu_proveedores(db)
-            elif opcion == "11":
-                menu_pagos(db)
-            elif opcion == "12":
-                menu_reportes(db)
-            elif opcion == "0":
+            if opcion == "0":
                 print("\n¡Hasta luego!")
                 break
+            elif opcion == str(len(MENUS) + 1):
+                menu_reportes(db)
+            elif opcion.isdigit() and 1 <= int(opcion) <= len(MENUS):
+                menu_tabla(db, *MENUS[int(opcion) - 1])
             else:
                 print("✗ Opción inválida")
 
